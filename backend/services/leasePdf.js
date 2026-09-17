@@ -13,6 +13,7 @@
 
 const PDFDocument = require('pdfkit');
 const pool        = require('../config/db');
+const { drawLogoMark, drawFooterLine, BRAND, SIDEBAR_BG } = require('../utils/pdfBranding');
 
 async function generateLeasePdf(tenancy_id, res) {
   const [[ten]] = await pool.query(`
@@ -49,16 +50,22 @@ async function generateLeasePdf(tenancy_id, res) {
   const today = new Date().toLocaleDateString('en-KE', { day: 'numeric', month: 'long', year: 'numeric' });
 
   // ── Cover header ─────────────────────────────────────────────
-  doc.rect(0, 0, 612, 130).fill('#0f172a');
+  doc.rect(0, 0, 612, 145).fill(SIDEBAR_BG);
+  drawLogoMark(doc, (612 - 28) / 2, 16, 28); // centered logo mark above the title, matching the app's actual brand
+  doc.font('Helvetica-Bold').fontSize(13);
+  const wSmart = doc.widthOfString('Smart'), wNyumba = doc.widthOfString('Nyumba');
+  const wordmarkX = (612 - wSmart - wNyumba) / 2;
+  doc.fill('white').text('Smart', wordmarkX, 50, { continued: true, lineBreak: false });
+  doc.fill(BRAND).text('Nyumba', { lineBreak: false });
   doc.fill('white').font('Helvetica-Bold').fontSize(20)
-     .text('RESIDENTIAL TENANCY AGREEMENT', 60, 40, { align: 'center', width: 492 });
+     .text('RESIDENTIAL TENANCY AGREEMENT', 60, 68, { align: 'center', width: 492 });
   doc.font('Helvetica').fontSize(11).fill('#94a3b8')
-     .text(ten.property_name, 60, 70, { align: 'center', width: 492 });
+     .text(ten.property_name, 60, 98, { align: 'center', width: 492 });
   doc.fontSize(9).fill('#64748b')
-     .text(`Generated: ${today}   |   Tenancy #: ${tenancy_id}`, 60, 90, { align: 'center', width: 492 });
+     .text(`Generated: ${today}   |   Tenancy #: ${tenancy_id}`, 60, 118, { align: 'center', width: 492 });
 
   // ── Helper: section heading ───────────────────────────────────
-  let y = 155;
+  let y = 180;
   const section = (title) => {
     doc.rect(60, y, 492, 22).fill('#f1f5f9');
     doc.fill('#0f172a').font('Helvetica-Bold').fontSize(10).text(title, 66, y + 6);

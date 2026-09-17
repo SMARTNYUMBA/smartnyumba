@@ -3,6 +3,7 @@
 
 const PDFDocument = require('pdfkit');
 const pool        = require('../config/db');
+const { drawBrandedHeader, drawFooterLine, BRAND } = require('../utils/pdfBranding');
 
 async function generateStatementPdf(tenancy_id, res) {
   const [[tenancy]] = await pool.query(`
@@ -36,16 +37,16 @@ async function generateStatementPdf(tenancy_id, res) {
     doc.pipe(res);
   }
 
-  // Header
-  doc.rect(0,0,612,100).fill('#0369a1');
-  doc.fill('white').font('Helvetica-Bold').fontSize(18).text('SMARTNYUMBA RMS', 50, 25);
-  doc.font('Helvetica').fontSize(10).text(tenancy.property_name, 50, 48);
-  doc.text(tenancy.address||tenancy.location||'', 50, 62);
-  doc.fill('#bae6fd').font('Helvetica-Bold').fontSize(12).text('ACCOUNT STATEMENT', 390, 30);
-  doc.fill('white').font('Helvetica').fontSize(9)
-    .text(`Generated: ${new Date().toLocaleDateString('en-KE',{day:'numeric',month:'long',year:'numeric'})}`, 390, 50)
-    .text(`Tenant: ${tenancy.full_name}`, 390, 65)
-    .text(`Unit: ${tenancy.unit_number}`, 390, 78);
+  // Header (shared branded header — see utils/pdfBranding.js)
+  drawBrandedHeader(doc, {
+    subtitle: [tenancy.property_name, tenancy.address||tenancy.location].filter(Boolean).join(' — '),
+    docTitle: 'ACCOUNT STATEMENT',
+    rightLines: [
+      `Generated: ${new Date().toLocaleDateString('en-KE',{day:'numeric',month:'long',year:'numeric'})}`,
+      `Tenant: ${tenancy.full_name}`,
+      `Unit: ${tenancy.unit_number}`,
+    ],
+  });
 
   doc.fill('#1e293b').fontSize(10).moveDown(3.5);
 
@@ -102,6 +103,9 @@ async function generateStatementPdf(tenancy_id, res) {
     .text(`${totalInvoiced.toLocaleString()}`, 350, y+8, {width:65,align:'right'})
     .text(`${totalPaid.toLocaleString()}`, 420, y+8, {width:65,align:'right'});
   doc.fill(balance>0?'#dc2626':'#16a34a').text(`${Math.abs(balance).toLocaleString()} ${balance>0?'OWED':'CREDIT'}`, 490, y+8, {width:70,align:'right'});
+
+  y += 45;
+  drawFooterLine(doc, 50, y, 512);
 
   doc.end();
   return doc;

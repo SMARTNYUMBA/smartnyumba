@@ -1,5 +1,6 @@
 const PDFDocument = require('pdfkit');
 const pool        = require('../config/db');
+const { drawBrandedHeader, drawFooterLine, BRAND } = require('../utils/pdfBranding');
 
 async function generateInvoicePdf(invoice_id, res) {
   const [[inv]] = await pool.query(`
@@ -20,17 +21,16 @@ async function generateInvoicePdf(invoice_id, res) {
     doc.pipe(res);
   }
 
-  // Header band
-  doc.rect(0, 0, 612, 110).fill('#0369a1');
-  doc.fill('white').font('Helvetica-Bold').fontSize(20).text('SMARTNYUMBA RMS', 50, 30);
-  doc.font('Helvetica').fontSize(10).text('Rental Management System', 50, 55);
-  doc.text(inv.property_name, 50, 70);
-  doc.text(inv.location || '', 50, 85);
-  doc.fill('#bae6fd').font('Helvetica-Bold').fontSize(13).text('TAX INVOICE', 400, 35);
-  doc.fill('white').font('Helvetica').fontSize(10)
-    .text(`Invoice #: INV-${String(inv.id).padStart(5,'0')}`, 400, 55)
-    .text(`Date: ${new Date(inv.created_at).toLocaleDateString('en-KE',{day:'numeric',month:'long',year:'numeric'})}`, 400, 70)
-    .text(`Due: ${new Date(inv.due_date).toLocaleDateString('en-KE',{day:'numeric',month:'long',year:'numeric'})}`, 400, 85);
+  // Header (shared branded header — see utils/pdfBranding.js)
+  drawBrandedHeader(doc, {
+    subtitle: [inv.property_name, inv.location].filter(Boolean).join(' — '),
+    docTitle: 'TAX INVOICE',
+    rightLines: [
+      `Invoice #: INV-${String(inv.id).padStart(5,'0')}`,
+      `Date: ${new Date(inv.created_at).toLocaleDateString('en-KE',{day:'numeric',month:'long',year:'numeric'})}`,
+      `Due: ${new Date(inv.due_date).toLocaleDateString('en-KE',{day:'numeric',month:'long',year:'numeric'})}`,
+    ],
+  });
 
   doc.fill('#1e293b').moveDown(3);
   const row = (l,v,y) => {
@@ -38,7 +38,7 @@ async function generateInvoicePdf(invoice_id, res) {
     doc.fill('#1e293b').text(v||'—',220,y);
   };
   let y = 140;
-  doc.font('Helvetica-Bold').fontSize(11).fill('#0369a1').text('BILL TO',50,y); y+=20;
+  doc.font('Helvetica-Bold').fontSize(11).fill(BRAND).text('BILL TO',50,y); y+=20;
   row('Name:',    inv.tenant_name,  y); y+=18;
   row('Phone:',   inv.tenant_phone, y); y+=18;
   row('Unit:',    inv.unit_number,  y); y+=18;
@@ -64,12 +64,15 @@ async function generateInvoicePdf(invoice_id, res) {
   doc.fill('#64748b').font('Helvetica').fontSize(10).text('Balance due:',60,y+10);
   doc.fill(statusColor).font('Helvetica-Bold').fontSize(22)
     .text(`KES ${Number(inv.balance).toLocaleString('en-KE',{minimumFractionDigits:2})}`,280,y+8);
-  doc.fill('#94a3b8').font('Helvetica').fontSize(9).text(`Status: ${inv.status.toUpperCase()}`,430,y+15);
+  // BUG FIX: status text at a fixed x=430 collided with the amount above
+  // it (a 22pt bold amount can easily run past x=430) — moved to its own
+  // right-aligned line below the amount instead of a fixed x beside it.
+  doc.fill('#94a3b8').font('Helvetica').fontSize(9).text(`Status: ${inv.status.toUpperCase()}`,280,y+34,{width:282,align:'right'});
 
   y += 75;
   doc.fill('#64748b').font('Helvetica').fontSize(9)
-    .text('Payment via: M-Pesa Paybill 400200 | Account: ' + inv.unit_number, 50, y, {align:'center',width:512})
-    .text('SmartNyumba Rental Management System — automated invoice', 50, y+14, {align:'center',width:512});
+    .text('Payment via: M-Pesa Paybill 400200 | Account: ' + inv.unit_number, 50, y, {align:'center',width:512});
+  drawFooterLine(doc, 50, y+14, 512);
 
   doc.end();
   return doc;
