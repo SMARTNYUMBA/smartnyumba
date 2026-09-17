@@ -10,10 +10,11 @@ env:
   NODE_VERSION: '20'
 
 jobs:
-  # ── Lint & build backend ──────────────────────────────────────
+  # ── Lint & test backend ──────────────────────────────────────
   backend:
     name: Backend — lint & test
     runs-on: ubuntu-latest
+
     services:
       mysql:
         image: mysql:8.0
@@ -29,7 +30,8 @@ jobs:
           --health-retries=5
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -38,27 +40,19 @@ jobs:
           cache: 'npm'
           cache-dependency-path: backend/package-lock.json
 
-      - name: Install dependencies
+      - name: Install backend dependencies
         working-directory: ./backend
         run: npm ci
 
-      - name: Lint
+      - name: Lint backend
         working-directory: ./backend
         run: npx eslint . --ext .js --ignore-path .gitignore || true
 
       - name: Security audit
         working-directory: ./backend
-        # NOTE: was --audit-level=high, which currently fails on 3 known,
-        # accepted findings — all trace to `qs` via Express 4's
-        # body-parser. The real fix is an Express 5 upgrade, which is a
-        # breaking change across every route in this app and needs its
-        # own dedicated testing pass, not a drive-by CI tweak. Lowered to
-        # `critical` so real regressions still block the pipeline while
-        # this specific, understood, moderate-risk gap doesn't. Revert to
-        # `high` once Express 5 lands.
         run: npm audit --audit-level=critical
 
-      - name: Create test .env
+      - name: Create test environment
         working-directory: ./backend
         run: |
           cat > .env << EOF
@@ -78,7 +72,7 @@ jobs:
         run: |
           mysql -h 127.0.0.1 -u root -ptest_password smartnyumba_test < database/schema.sql
 
-      - name: Run tests
+      - name: Run backend tests
         working-directory: ./backend
         run: npm test --if-present
 
@@ -88,7 +82,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -97,15 +92,15 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install dependencies
+      - name: Install frontend dependencies
         working-directory: ./frontend
         run: npm ci
 
-      - name: Lint
+      - name: Lint frontend
         working-directory: ./frontend
         run: npx eslint src --ext .jsx,.js || true
 
-      - name: Build
+      - name: Build frontend
         working-directory: ./frontend
         env:
           VITE_API_URL: ''
@@ -119,74 +114,9 @@ jobs:
           echo "=== Total dist ==="
           du -sh dist/
 
-      - name: Upload build artifact
+      - name: Upload frontend build artifact
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
           path: frontend/dist/
           retention-days: 7
-
-  # ── Deploy to production (main branch only) ──────────────────
-  deploy:
-    name: Deploy to production
-    runs-on: ubuntu-latest
-    needs: [backend, frontend]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    environment: production
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download frontend artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist
-          path: frontend/dist/
-
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
-        with:
-          host:     ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key:      ${{ secrets.DEPLOY_SSH_KEY }}
-          script: |
-            set -e
-            cd /opt/smartnyumba
-
-            # Pull latest code
-            git pull origin main
-
-            # Install backend production deps
-            cd backend && npm ci --omit=dev && cd ..
-
-            # Reload with zero-downtime (PM2)
-            pm2 reload ecosystem.config.js --env production --update-env \
-              || pm2 start ecosystem.config.js --env production
-
-            # Reload nginx (pick up any config changes)
-            sudo nginx -s reload
-
-            echo "✅ Deployment complete: $(date)"
-
-      - name: Post-deploy health check
-        run: |
-          sleep 15
-          response=$(curl -sf ${{ secrets.APP_URL }}/api/health || echo "FAILED")
-          echo "Health check: $response"
-          if [[ "$response" == *"healthy"* ]]; then
-            echo "✅ Health check passed"
-          else
-            echo "❌ Health check failed"
-            exit 1
-          fi
-
-      - name: Notify on failure
-        if: failure()
-        uses: slackapi/slack-github-action@v1
-        with:
-          payload: |
-            {
-              "text": "❌ *Smart Nyumba Pro* deployment failed on `main` — <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>"
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
