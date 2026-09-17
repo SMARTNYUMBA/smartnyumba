@@ -1,0 +1,11 @@
+const router = require('express').Router();
+const auth   = require('../middleware/auth');
+const c      = require('../controllers/security/logbook');
+const roles  = ['super_admin','property_manager','security'];
+router.get('/incidents',     auth(roles), c.getIncidents);
+router.post('/incidents',    auth(roles), c.createIncident);
+router.get('/patrols',       auth(roles), c.getPatrols);
+router.post('/patrols',      auth(roles), c.createPatrol);
+router.get('/equipment',     auth(roles), c.getEquipment);
+router.post('/equipment',    auth(roles), c.createEquipmentCheck);
+module.exports = router;

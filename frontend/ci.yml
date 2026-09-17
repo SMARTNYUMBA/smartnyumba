@@ -1,0 +1,183 @@
+name: Smart Nyumba Pro — CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ── Lint & build backend ────────────────────────────────────
+  backend:
+    name: Backend — lint & test
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test_password
+          MYSQL_DATABASE: smartnyumba_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Lint
+        working-directory: ./backend
+        run: npx eslint . --ext .js --ignore-path .gitignore || true
+
+      - name: Security audit
+        working-directory: ./backend
+        run: npm audit --audit-level=high
+
+      - name: Create test .env
+        working-directory: ./backend
+        run: |
+          cat > .env << EOF
+          NODE_ENV=test
+          PORT=3002
+          DB_HOST=127.0.0.1
+          DB_PORT=3306
+          DB_NAME=smartnyumba_test
+          DB_USER=root
+          DB_PASSWORD=test_password
+          DB_POOL_LIMIT=5
+          JWT_SECRET=${{ secrets.JWT_SECRET_TEST || 'test_jwt_secret_that_is_at_least_32_chars_long' }}
+          EOF
+
+      - name: Run schema migration
+        working-directory: ./backend
+        run: |
+          mysql -h 127.0.0.1 -u root -ptest_password smartnyumba_test < ../database/schema.sql || true
+
+      - name: Run tests
+        working-directory: ./backend
+        run: npm test --if-present
+
+  # ── Build & lint frontend ───────────────────────────────────
+  frontend:
+    name: Frontend — build & bundle
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: ./frontend
+        run: npx eslint src --ext .jsx,.js || true
+
+      - name: Build
+        working-directory: ./frontend
+        env:
+          VITE_APP_NAME: 'Smart Nyumba Pro'
+        run: npm run build
+
+      - name: Analyse bundle size
+        working-directory: ./frontend
+        run: |
+          echo "=== Bundle sizes ==="
+          du -sh dist/assets/*.js | sort -h
+          echo "=== Total dist ==="
+          du -sh dist/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          retention-days: 7
+
+  # ── Deploy to production (main branch only) ─────────────────
+  deploy:
+    name: Deploy to production
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host:     ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key:      ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/smartnyumba
+
+            # Pull latest code
+            git pull origin main
+
+            # Install backend deps
+            cd backend && npm ci --omit=dev && cd ..
+
+            # Restart with zero-downtime (PM2)
+            pm2 reload ecosystem.config.js --update-env || pm2 start ecosystem.config.js
+
+            # Reload nginx (pick up any config changes)
+            sudo nginx -s reload
+
+            echo "✅ Deployment complete: $(date)"
+
+      - name: Post-deploy health check
+        run: |
+          sleep 15
+          response=$(curl -sf ${{ secrets.APP_URL }}/api/health || echo "FAILED")
+          echo "Health check: $response"
+          if [[ "$response" == *"healthy"* ]]; then
+            echo "✅ Health check passed"
+          else
+            echo "❌ Health check failed"
+            exit 1
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "❌ *Smart Nyumba Pro* deployment failed on `main` — <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

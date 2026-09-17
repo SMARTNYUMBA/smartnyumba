@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Environment secrets — NEVER commit these
+.env
+.env.staging
+.env.production
+
+# Runtime data
+uploads/
+logs/
+*.log
+
+# Build artifacts
+dist/
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

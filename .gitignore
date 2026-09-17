@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment secrets
+.env
+.env.local
+.env.staging
+.env.production
+**/.env
+**/.env.staging
+**/.env.production
+
+# Runtime data
+backend/uploads/
+backend/logs/
+logs/
+*.log
+
+# Build artifacts
+frontend/dist/
+dist/
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+backend.zip
+backend/.git-old/
+backend/.git-backup/

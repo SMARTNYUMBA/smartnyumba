@@ -1,0 +1,38 @@
+# Smart Nyumba Pro — Local development stack
+# Usage: docker compose up -d
+# Then: npm run dev (backend auto-connects to mysql service below)
+
+version: '3.9'
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: smartnyumba_dev
+      MYSQL_DATABASE: smartnyumba
+      MYSQL_USER: smartnyumba
+      MYSQL_PASSWORD: smartnyumba_dev
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      retries: 5
+
+  backend:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    env_file: .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./uploads:/app/uploads
+
+volumes:
+  mysql_data:

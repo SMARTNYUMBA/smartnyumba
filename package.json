@@ -1,0 +1,17 @@
+{
+  "name": "smartnyumba-pro",
+  "version": "2.1.0",
+  "description": "Smart Nyumba Pro — E2E test runner and project root",
+  "private": true,
+  "scripts": {
+    "test:e2e":         "playwright test",
+    "test:e2e:headed":  "playwright test --headed",
+    "test:e2e:ui":      "playwright test --ui",
+    "test:e2e:report":  "playwright show-report",
+    "test:unit":        "cd backend && node --test tests/**/*.test.js",
+    "test:all":         "npm run test:unit && npm run test:e2e"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
+  }
+}

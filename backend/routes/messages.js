@@ -1,0 +1,11 @@
+const router = require('express').Router();
+const auth   = require('../middleware/auth');
+const c      = require('../controllers/admin/messages');
+router.get('/staff',      auth(), c.getStaff);
+router.get('/inbox',      auth(), c.getInbox);
+router.get('/sent',       auth(), c.getSent);
+router.post('/',          auth(), c.send);
+router.put('/:id/read',   auth(), c.markRead);
+router.get('/:id/thread', auth(), c.getThread);
+router.post('/:id/reply', auth(), c.reply);
+module.exports = router;

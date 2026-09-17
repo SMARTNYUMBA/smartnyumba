@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Environment — use Vercel/CI env vars instead
+.env
+.env.local
+.env.production
+
+# Build output
+dist/
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

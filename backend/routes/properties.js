@@ -1,0 +1,10 @@
+const router = require('express').Router();
+const auth   = require('../middleware/auth');
+const c      = require('../controllers/admin/properties');
+const roles  = ['super_admin','property_manager','caretaker','security'];
+router.get('/',     auth(roles), c.getAll);
+router.post('/',    auth(['super_admin']), c.create);
+router.get('/:id',  auth(roles), c.getOne);
+router.put('/:id',  auth(['super_admin']), c.update);
+router.delete('/:id', auth(['super_admin']), c.delete);
+module.exports = router;
