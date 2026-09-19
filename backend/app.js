@@ -140,7 +140,13 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'X-Requested-With'],
+  allowedHeaders: [
+  'Content-Type',
+  'Authorization',
+  'Cache-Control',
+  'X-Request-ID',
+  'X-Requested-With',
+],
 }));
 
 // ── Global rate limiter ───────────────────────────────────────
