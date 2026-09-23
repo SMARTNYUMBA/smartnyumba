@@ -150,11 +150,25 @@ exports.refresh = async (req, res) => {
     if (!refresh_token) return err(res, 'refresh_token required', 401);
 
     const [[rt]] = await pool.query(
-      `SELECT rt.*, u.id uid, u.full_name, u.email, u.role, u.property_id, u.org_id
+      `SELECT rt.*, u.id uid, u.full_name, u.email, u.role, u.property_id, u.org_id,
+        u.is_suspended, u.is_active, u.suspension_reason
        FROM refresh_tokens rt JOIN users u ON rt.user_id = u.id
        WHERE rt.token = ? AND rt.expires_at > NOW() LIMIT 1`,
       [hashToken(refresh_token)]);
     if (!rt) { clearRefreshCookie(res); return err(res, 'Invalid or expired refresh token', 401); }
+
+    // BUG FIX: refresh never checked suspension/active status at all —
+    // middleware/auth.js's live check only runs on actual API calls, so
+    // a suspended user could keep this endpoint alive indefinitely
+    // (refresh tokens are reissued fresh for 7 more days on every use)
+    // without ever calling an endpoint that would catch it. Revoke the
+    // token outright rather than just rejecting this one request, so
+    // the suspended session can't keep retrying refresh either.
+    if (rt.is_suspended || rt.is_active === 0) {
+      await pool.query('DELETE FROM refresh_tokens WHERE token=?', [hashToken(refresh_token)]);
+      clearRefreshCookie(res);
+      return err(res, rt.is_suspended ? (rt.suspension_reason || 'Account suspended') : 'Account deactivated', 403);
+    }
 
     // BUG FIX: org_id was missing from the reissued JWT here, even though
     // login's payload includes it. Every token refresh silently dropped
@@ -168,7 +182,7 @@ exports.refresh = async (req, res) => {
     await pool.query('DELETE FROM refresh_tokens WHERE token=?', [hashToken(refresh_token)]);
     await pool.query('INSERT INTO refresh_tokens (user_id,token,expires_at,ip,user_agent) VALUES (?,?,?,?,?)',
       [rt.user_id, hashToken(newRef), new Date(Date.now() + 7 * 86400000),
-       (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim().slice(0,45),
+       (req.ip || '').slice(0,45), // SECURITY FIX: was reading raw x-forwarded-for directly (spoofable) — see app.js's trust proxy comment
        (req.headers['user-agent']||'').slice(0,255)]);
     setRefreshCookie(res, newRef);
 

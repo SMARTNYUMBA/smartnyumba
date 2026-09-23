@@ -1030,6 +1030,28 @@ async function verifyDemo() {
 }
 
 async function main() {
+  // SAFETY GUARD: this script deletes data (properties, tenancies,
+  // payments, maintenance records, etc.) matching the demo dataset, then
+  // reseeds. It had NO protection at all against being run against a
+  // real production database — a genuine risk flagged in the project's
+  // own deployment checklist ("demo/reset scripts aren't accidentally
+  // run against production"). NODE_ENV=production is the same signal
+  // middleware/safaricomIp.js already uses elsewhere in this codebase
+  // to distinguish production from dev/staging, so this follows that
+  // same convention: a hard block, no override flag, because a
+  // destructive script should never need to run in production at all —
+  // if you genuinely need to reset a prod-like staging environment,
+  // that environment simply shouldn't have NODE_ENV=production set.
+  if (process.env.NODE_ENV === 'production') {
+    console.error('');
+    console.error('❌ REFUSING TO RUN: NODE_ENV=production');
+    console.error('   This script deletes data and reseeds demo accounts.');
+    console.error('   It must never run against a production database.');
+    console.error('');
+    process.exitCode = 1;
+    return;
+  }
+
   try {
     await resetDemo();
 

@@ -26,8 +26,15 @@ process.env.NODE_ENV   = 'test';
 // regardless of local DB config, matching every other test file's pattern.
 require.cache[require.resolve('../config/db')] = {
   exports: mockPool({
-    'SELECT property_id, is_suspended, suspension_reason FROM users WHERE id=? LIMIT 1':
-      [[{ property_id: null, is_suspended: 0, suspension_reason: null }]],
+    'SELECT property_id, is_suspended, is_active, suspension_reason FROM users WHERE id=? LIMIT 1':
+      (sql, params) => {
+        // sub:9 is the suspended-tenant fixture for the regression test below;
+        // everyone else gets the normal not-suspended row.
+        if (params && params[0] === 9) {
+          return [[{ property_id: null, is_suspended: 1, is_active: 1, suspension_reason: null }]];
+        }
+        return [[{ property_id: null, is_suspended: 0, is_active: 1, suspension_reason: null }]];
+      },
   }),
 };
 
@@ -71,11 +78,15 @@ describe('JWT auth middleware', () => {
     assert.equal(res._body.requires_mfa, true);
   });
 
-  test('rejects insufficient role', () => {
+  test('rejects insufficient role', async () => {
     const jwt = require('jsonwebtoken');
     const tok = jwt.sign({ sub: 2, role: 'tenant' }, process.env.JWT_SECRET, { expiresIn: '1h' });
     const res = mockRes();
-    auth(['super_admin'])(makeReq(tok), res, () => { throw new Error('should not call next'); });
+    // Awaited: unlike the earlier synchronous-rejection tests above, a
+    // `tenant` token now correctly goes through the async live-suspension
+    // check (see middleware/auth.js) before reaching the role check —
+    // that check must resolve before res._status reflects the outcome.
+    await auth(['super_admin'])(makeReq(tok), res, () => { throw new Error('should not call next'); });
     assert.equal(res._status, 403);
   });
 
@@ -96,12 +107,26 @@ describe('JWT auth middleware', () => {
     const req = makeReq(tok);
     const res = mockRes();
     let called = false;
-    // auth() is async: for any role other than tenant/super_admin it does
-    // an (awaited, try/catch-guarded) DB lookup to refresh property_id and
-    // check suspension status before calling next() — must await it here,
-    // or the assertion below can run before next() actually fires.
+    // auth() is async: for any role other than super_admin it does an
+    // (awaited, try/catch-guarded) DB lookup for the live suspension
+    // check (and, for staff roles, a property_id refresh) before calling
+    // next() — must await it here, or the assertion below can run before
+    // next() actually fires.
     await auth()(req, res, () => { called = true; });
     assert.ok(called);
+  });
+
+  test('rejects a suspended tenant, even with a still-valid JWT', async () => {
+    // Regression test: this used to be broken — the live suspension
+    // check explicitly skipped the tenant role, so a tenant suspended
+    // after logging in kept full access until their token expired.
+    // sub:9 is wired in the top-of-file mock to a is_suspended:1 row.
+    const jwt = require('jsonwebtoken');
+    const tok = jwt.sign({ sub: 9, role: 'tenant' }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    const res = mockRes();
+    await auth()(makeReq(tok), res, () => { throw new Error('should not call next for a suspended tenant'); });
+    assert.equal(res._status, 403);
+    assert.equal(res._body.error, 'Account suspended');
   });
 });
 

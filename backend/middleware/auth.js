@@ -50,27 +50,41 @@ const auth = (roles = []) => async (req, res, next) => {
       return res.status(401).json({ error: 'MFA verification required', requires_mfa: true });
     req.user = decoded;
 
-    // ── Refresh property_id from DB for staff roles (cached 5s) ──────────
-    // JWT embeds property_id at login time. If admin reassigns a caretaker/security
-    // to a different property, the old JWT has stale data. Re-read from DB so all
-    // controllers see the current assignment without requiring a forced re-login.
-    if (decoded.role && decoded.role !== 'tenant' && decoded.role !== 'super_admin' && decoded.sub) {
+    // ── Live suspension check + property_id refresh (cached 5s) ──────────
+    // BUG FIX: this used to skip suspension checks entirely for `tenant`,
+    // alongside skipping the (staff-only) property_id refresh for both
+    // `tenant` and `super_admin`. Those are two different concerns that
+    // got bundled into one condition — bundling them meant a tenant
+    // suspended by an admin kept full access for the rest of their
+    // token's life (up to 1h access token, or indefinitely if they kept
+    // hitting /refresh, since that endpoint didn't check suspension
+    // either — see controllers/auth/index.js#refresh). Staff roles were
+    // never affected by that gap, since they already got this live check.
+    // Now: suspension is checked live for every role except super_admin
+    // (top of the hierarchy, not suspendable through this path); the
+    // property_id refresh — which only makes sense for staff, since a
+    // tenant's property comes from their tenancy, not users.property_id —
+    // stays staff-only.
+    if (decoded.role && decoded.role !== 'super_admin' && decoded.sub) {
       try {
         const pool = require('../config/db');
         const cache = require('../services/cache');
         const cacheKey = `user_status:${decoded.sub}`;
         let fresh = await cache.get(cacheKey);
         if (!fresh) {
-          const [[row]] = await pool.query('SELECT property_id, is_suspended, suspension_reason FROM users WHERE id=? LIMIT 1', [decoded.sub]);
+          const [[row]] = await pool.query('SELECT property_id, is_suspended, is_active, suspension_reason FROM users WHERE id=? LIMIT 1', [decoded.sub]);
           if (row) {
             fresh = row;
             await cache.set(cacheKey, fresh, 5); // 5s TTL, matches original intent
           }
         }
         if (fresh) {
-          req.user.property_id = fresh.property_id;
+          if (decoded.role !== 'tenant') req.user.property_id = fresh.property_id;
           if (fresh.is_suspended) {
             return res.status(403).json({ error: 'Account suspended', reason: fresh.suspension_reason || 'Contact your administrator' });
+          }
+          if (fresh.is_active === 0) {
+            return res.status(403).json({ error: 'Account deactivated' });
           }
         }
       } catch (_) {} // non-fatal — fall through with JWT data if DB unavailable

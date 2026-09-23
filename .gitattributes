@@ -1,0 +1,26 @@
+# Normalize line endings for everyone, regardless of OS or editor.
+#
+# Added because this repo accumulated 35 files with LF<->CRLF-only
+# diffs (no real content change) from Windows editing tools (Notepad,
+# a broken PowerShell -EncodedCommand session) flipping line endings.
+# That noise made real changes hard to spot in `git diff` / `git status`
+# and contributed to at least one real incident: seed_demo.js's actual
+# content got overwritten by reset_demo.js's logic during the same kind
+# of editing session, and the corruption was easy to miss inside a
+# 1800+ line diff dominated by line-ending noise.
+#
+# `text=auto` lets Git decide text vs binary; `eol=lf` forces LF in the
+# repository regardless of what line ending your local checkout uses,
+# so `git diff` only ever shows real content changes going forward.
+* text=auto eol=lf
+
+# Binary files some tools might otherwise try to "normalize" and corrupt.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.woff binary
+*.woff2 binary
